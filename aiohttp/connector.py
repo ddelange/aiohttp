@@ -25,6 +25,7 @@ from typing import (  # noqa
     List,
     Literal,
     Optional,
+    Sequence,
     Set,
     Tuple,
     Type,
@@ -61,6 +62,14 @@ try:
 except ImportError:  # pragma: no cover
     ssl = None  # type: ignore[assignment]
     SSLContext = object  # type: ignore[misc,assignment]
+
+
+EMPTY_SCHEMA_SET = frozenset({""})
+HTTP_SCHEMA_SET = frozenset({"http", "https"})
+WS_SCHEMA_SET = frozenset({"ws", "wss"})
+
+HTTP_AND_EMPTY_SCHEMA_SET = HTTP_SCHEMA_SET | EMPTY_SCHEMA_SET
+HIGH_LEVEL_SCHEMA_SET = HTTP_AND_EMPTY_SCHEMA_SET | WS_SCHEMA_SET
 
 
 __all__ = ("BaseConnector", "TCPConnector", "UnixConnector", "NamedPipeConnector")
@@ -188,6 +197,8 @@ class BaseConnector:
 
     # abort transport after 2 seconds (cleanup broken connections)
     _cleanup_closed_period = 2.0
+
+    allowed_protocol_schema_set = HIGH_LEVEL_SCHEMA_SET
 
     def __init__(
         self,
@@ -740,6 +751,8 @@ class TCPConnector(BaseConnector):
     loop - Optional event loop.
     """
 
+    allowed_protocol_schema_set = HIGH_LEVEL_SCHEMA_SET | frozenset({"tcp"})
+
     def __init__(
         self,
         *,
@@ -812,7 +825,7 @@ class TCPConnector(BaseConnector):
             self._cached_hosts.clear()
 
     async def _resolve_host(
-        self, host: str, port: int, traces: Optional[List["Trace"]] = None
+        self, host: str, port: int, traces: Optional[Sequence["Trace"]] = None
     ) -> List[ResolveResult]:
         """Resolve host and return list of addresses."""
         if is_ip_address(host):
@@ -880,7 +893,7 @@ class TCPConnector(BaseConnector):
         key: Tuple[str, int],
         host: str,
         port: int,
-        traces: Optional[List["Trace"]],
+        traces: Optional[Sequence["Trace"]],
     ) -> List[ResolveResult]:
         """Resolve host with a dns events throttle."""
         if key in self._throttle_dns_events:
@@ -1341,6 +1354,8 @@ class UnixConnector(BaseConnector):
     loop - Optional event loop.
     """
 
+    allowed_protocol_schema_set = HIGH_LEVEL_SCHEMA_SET | frozenset({"unix"})
+
     def __init__(
         self,
         path: str,
@@ -1394,6 +1409,8 @@ class NamedPipeConnector(BaseConnector):
     limit_per_host - Number of simultaneous connections to one host.
     loop - Optional event loop.
     """
+
+    allowed_protocol_schema_set = HIGH_LEVEL_SCHEMA_SET | frozenset({"npipe"})
 
     def __init__(
         self,

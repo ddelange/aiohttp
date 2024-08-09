@@ -1,6 +1,7 @@
 import asyncio
 import asyncio.streams
 import dataclasses
+import sys
 import traceback
 from collections import deque
 from contextlib import suppress
@@ -148,8 +149,6 @@ class RequestHandler(BaseProtocol):
 
     """
 
-    KEEPALIVE_RESCHEDULE_DELAY = 1
-
     __slots__ = (
         "_request_count",
         "_keepalive",
@@ -157,12 +156,13 @@ class RequestHandler(BaseProtocol):
         "_request_handler",
         "_request_factory",
         "_tcp_keepalive",
-        "_keepalive_time",
+        "_next_keepalive_close_time",
         "_keepalive_handle",
         "_keepalive_timeout",
         "_lingering_time",
         "_messages",
         "_message_tail",
+        "_handler_waiter",
         "_waiter",
         "_task_handler",
         "_upgrade",
@@ -206,7 +206,7 @@ class RequestHandler(BaseProtocol):
 
         self._tcp_keepalive = tcp_keepalive
         # placeholder to be replaced on keepalive timeout setup
-        self._keepalive_time = 0.0
+        self._next_keepalive_close_time = 0.0
         self._keepalive_handle: Optional[asyncio.Handle] = None
         self._keepalive_timeout = keepalive_timeout
         self._lingering_time = float(lingering_time)
@@ -215,6 +215,7 @@ class RequestHandler(BaseProtocol):
         self._message_tail = b""
 
         self._waiter: Optional[asyncio.Future[None]] = None
+        self._handler_waiter: Optional[asyncio.Future[None]] = None
         self._task_handler: Optional[asyncio.Task[None]] = None
 
         self._upgrade = False
@@ -278,11 +279,11 @@ class RequestHandler(BaseProtocol):
         if self._waiter:
             self._waiter.cancel()
 
-        # Wait for graceful disconnection
-        if self._current_request is not None:
+        # Wait for graceful handler completion
+        if self._handler_waiter is not None:
             with suppress(asyncio.CancelledError, asyncio.TimeoutError):
                 async with ceil_timeout(timeout):
-                    await self._current_request.wait_for_disconnection()
+                    await self._handler_waiter
         # Then cancel handler and wait
         with suppress(asyncio.CancelledError, asyncio.TimeoutError):
             async with ceil_timeout(timeout):
@@ -442,23 +443,21 @@ class RequestHandler(BaseProtocol):
         self.logger.exception(*args, **kw)
 
     def _process_keepalive(self) -> None:
+        self._keepalive_handle = None
         if self._force_close or not self._keepalive:
             return
 
-        next = self._keepalive_time + self._keepalive_timeout
+        loop = self._loop
+        now = loop.time()
+        close_time = self._next_keepalive_close_time
+        if now <= close_time:
+            # Keep alive close check fired too early, reschedule
+            self._keepalive_handle = loop.call_at(close_time, self._process_keepalive)
+            return
 
         # handler in idle state
         if self._waiter:
-            if self._loop.time() > next:
-                self.force_close()
-                return
-
-        # not all request handlers are done,
-        # reschedule itself to next second
-        self._keepalive_handle = self._loop.call_later(
-            self.KEEPALIVE_RESCHEDULE_DELAY,
-            self._process_keepalive,
-        )
+            self.force_close()
 
     async def _handle_request(
         self,
@@ -466,6 +465,7 @@ class RequestHandler(BaseProtocol):
         start_time: float,
         request_handler: Callable[[BaseRequest], Awaitable[StreamResponse]],
     ) -> Tuple[StreamResponse, bool]:
+        self._handler_waiter = self._loop.create_future()
         try:
             try:
                 self._current_request = request
@@ -489,6 +489,8 @@ class RequestHandler(BaseProtocol):
             reset = await self.finish_response(request, resp, start_time)
         else:
             reset = await self.finish_response(request, resp, start_time)
+        finally:
+            self._handler_waiter.set_result(None)
 
         return resp, reset
 
@@ -538,9 +540,11 @@ class RequestHandler(BaseProtocol):
             request = self._request_factory(message, payload, self, writer, handler)
             try:
                 # a new task is used for copy context vars (#3406)
-                task = self._loop.create_task(
-                    self._handle_request(request, start, request_handler)
-                )
+                coro = self._handle_request(request, start, request_handler)
+                if sys.version_info >= (3, 12):
+                    task = asyncio.Task(coro, loop=loop, eager_start=True)
+                else:
+                    task = loop.create_task(coro)
                 try:
                     resp, reset = await task
                 except (asyncio.CancelledError, ConnectionError):
@@ -600,11 +604,12 @@ class RequestHandler(BaseProtocol):
                     if self._keepalive and not self._close:
                         # start keep-alive timer
                         if keepalive_timeout is not None:
-                            now = self._loop.time()
-                            self._keepalive_time = now
+                            now = loop.time()
+                            close_time = now + keepalive_timeout
+                            self._next_keepalive_close_time = close_time
                             if self._keepalive_handle is None:
                                 self._keepalive_handle = loop.call_at(
-                                    now + keepalive_timeout, self._process_keepalive
+                                    close_time, self._process_keepalive
                                 )
                     else:
                         break
