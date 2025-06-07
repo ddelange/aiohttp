@@ -78,11 +78,11 @@ freezegun==1.5.2
     # via
     #   -r requirements/lint.in
     #   -r requirements/test.in
-frozenlist==1.6.0
+frozenlist==1.6.2
     # via
     #   -r requirements/runtime-deps.in
     #   aiosignal
-gidgethub==5.3.0
+gidgethub==5.4.0
     # via cherry-picker
 gunicorn==23.0.0
     # via -r requirements/base.in

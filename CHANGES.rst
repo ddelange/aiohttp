@@ -10,6 +10,120 @@
 
 .. towncrier release notes start
 
+3.12.11 (2025-06-07)
+====================
+
+Features
+--------
+
+- Improved SSL connection handling by changing the default ``ssl_shutdown_timeout``
+  from ``0.1`` to ``0`` seconds. SSL connections now use Python's default graceful
+  shutdown during normal operation but are aborted immediately when the connector
+  is closed, providing optimal behavior for both cases. Also added support for
+  ``ssl_shutdown_timeout=0`` on all Python versions. Previously, this value was
+  rejected on Python 3.11+ and ignored on earlier versions. Non-zero values on
+  Python < 3.11 now trigger a ``RuntimeWarning`` -- by :user:`bdraco`.
+
+  The ``ssl_shutdown_timeout`` parameter is now deprecated and will be removed in
+  aiohttp 4.0 as there is no clear use case for changing the default.
+
+
+  *Related issues and pull requests on GitHub:*
+  :issue:`11148`.
+
+
+
+
+Deprecations (removal in next major release)
+--------------------------------------------
+
+- Improved SSL connection handling by changing the default ``ssl_shutdown_timeout``
+  from ``0.1`` to ``0`` seconds. SSL connections now use Python's default graceful
+  shutdown during normal operation but are aborted immediately when the connector
+  is closed, providing optimal behavior for both cases. Also added support for
+  ``ssl_shutdown_timeout=0`` on all Python versions. Previously, this value was
+  rejected on Python 3.11+ and ignored on earlier versions. Non-zero values on
+  Python < 3.11 now trigger a ``RuntimeWarning`` -- by :user:`bdraco`.
+
+  The ``ssl_shutdown_timeout`` parameter is now deprecated and will be removed in
+  aiohttp 4.0 as there is no clear use case for changing the default.
+
+
+  *Related issues and pull requests on GitHub:*
+  :issue:`11148`.
+
+
+
+
+----
+
+
+3.12.10 (2025-06-07)
+====================
+
+Bug fixes
+---------
+
+- Fixed leak of ``aiodns.DNSResolver`` when :py:class:`~aiohttp.TCPConnector` is closed and no resolver was passed when creating the connector -- by :user:`Tasssadar`.
+
+  This was a regression introduced in version 3.12.0 (:pr:`10897`).
+
+
+  *Related issues and pull requests on GitHub:*
+  :issue:`11150`.
+
+
+
+
+----
+
+
+3.12.9 (2025-06-04)
+===================
+
+Bug fixes
+---------
+
+- Fixed ``IOBasePayload`` and ``TextIOPayload`` reading entire files into memory when streaming large files -- by :user:`bdraco`.
+
+  When using file-like objects with the aiohttp client, the entire file would be read into memory if the file size was provided in the ``Content-Length`` header. This could cause out-of-memory errors when uploading large files. The payload classes now correctly read data in chunks of ``READ_SIZE`` (64KB) regardless of the total content length.
+
+
+  *Related issues and pull requests on GitHub:*
+  :issue:`11138`.
+
+
+
+
+----
+
+
+3.12.8 (2025-06-04)
+===================
+
+Features
+--------
+
+- Added preemptive digest authentication to :class:`~aiohttp.DigestAuthMiddleware` -- by :user:`bdraco`.
+
+  The middleware now reuses authentication credentials for subsequent requests to the same
+  protection space, improving efficiency by avoiding extra authentication round trips.
+  This behavior matches how web browsers handle digest authentication and follows
+  :rfc:`7616#section-3.6`.
+
+  Preemptive authentication is enabled by default but can be disabled by passing
+  ``preemptive=False`` to the middleware constructor.
+
+
+  *Related issues and pull requests on GitHub:*
+  :issue:`11128`, :issue:`11129`.
+
+
+
+
+----
+
+
 3.12.7 (2025-06-02)
 ===================
 
