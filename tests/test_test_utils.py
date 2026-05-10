@@ -7,12 +7,13 @@ from typing import NoReturn
 from unittest import mock
 
 import pytest
-from multidict import CIMultiDict, CIMultiDictProxy
+from multidict import CIMultiDict
 from pytest_aiohttp import AiohttpClient
 from yarl import URL
 
 import aiohttp
 from aiohttp import web
+from aiohttp.helpers import HeadersDictProxy
 from aiohttp.test_utils import (
     REUSE_ADDRESS,
     AioHTTPTestCase,
@@ -170,7 +171,7 @@ def test_make_mocked_request(headers: Mapping[str, str]) -> None:
     assert req.method == "GET"
     assert req.path == "/"
     assert isinstance(req, web.Request)
-    assert isinstance(req.headers, CIMultiDictProxy)
+    assert isinstance(req.headers, HeadersDictProxy)
 
 
 def test_make_mocked_request_sslcontext() -> None:
