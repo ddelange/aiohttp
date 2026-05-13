@@ -2049,7 +2049,7 @@ async def test_cleanup_close_ssl_transport(  # type: ignore[misc]
     testset[ssl_key] = deque([(proto, 10)])
 
     loop = mock.Mock()
-    new_time = asyncio.get_event_loop().time() + 300
+    new_time = asyncio.get_running_loop().time() + 300
     loop.time.return_value = new_time
     conn = aiohttp.BaseConnector(enable_cleanup_closed=True)
     conn._loop = loop
