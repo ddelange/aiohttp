@@ -257,7 +257,32 @@ is non-obvious, a short reproducer or a paragraph on root cause is
 welcome. Long, multi-section essays with bolded sub-headings are
 not the style here.
 
-### 6. Commit hygiene
+### 6. Run the docs spell check before pushing
+
+The `lint` CI job builds the docs with `sphinxcontrib.spelling`
+under `make doc-spelling`, which is invoked with `-W
+--keep-going` so any unknown word is a hard failure. The spell
+checker reads every `CHANGES/*.rst` fragment as part of the
+build, so a technical word in your news fragment (`codecov`,
+`monkeypatch`, `parametrize`, `repr`, and so on) that is
+not in
+[`docs/spelling_wordlist.txt`](docs/spelling_wordlist.txt)
+will fail `make doc-spelling` and burn a CI run before a human
+even sees the PR.
+
+Before pushing:
+
+```bash
+make doc-spelling
+```
+
+If it flags a word you actually meant to use, add it to
+`docs/spelling_wordlist.txt` (one word per line, roughly
+alphabetical) in the same commit as the fragment. If it flags
+a typo, fix the typo. Do not paper over real misspellings by
+adding them to the wordlist.
+
+### 7. Commit hygiene
 
 - One logical change per PR. If a refactor and a bugfix are bundled
   together, split them.
@@ -352,6 +377,48 @@ CodSpeed benchmark leg, and wheel builds for manylinux, musllinux,
 macOS, and Windows. Do not regress the benchmarks without flagging
 the trade-off in the PR body.
 
+### Every line in a test must be covered
+
+Coverage in this repo tracks both `aiohttp/` and `tests/`; the
+CI test jobs run pytest with `--cov=aiohttp/ --cov=tests/` and
+the cython-coverage job does the same, so uncovered lines in
+`tests/` show up in the codecov patch report on every PR.
+Reviewers do look at that report. This catches a class of
+mistake agents make all the time: a defensive
+`raise RuntimeError("must not be called")` inside a
+monkeypatched stub the happy path never invokes, a cleanup
+branch behind `if had_own_attr:` that the test never enters, an
+`else` arm guarding a condition that is always true under the
+fixture. From the perspective of the unit suite all of those
+lines are dead code, and the codecov report flags them the same
+as dead code in `aiohttp/`.
+
+Design tests so every line runs:
+
+- Drive the fixture deterministically so both arms of any
+  conditional are hit, or drop the conditional entirely and
+  assert the single shape you actually set up.
+- Do not add `raise TypeError("must not be invoked")` guards
+  inside stubs the test installs; if the stub is never meant to
+  fire, either omit it or assert at the call site that it did
+  not. An unreachable `raise` is the most common form of this
+  failure.
+- Cleanup branches that only run when setup took a particular
+  shape (`if had_own_attr: ...` style restores) need a second
+  test, or a parametrize, that exercises the other shape. If
+  you cannot justify the second case, unconditionally restore
+  instead.
+- Prefer `monkeypatch` (which auto-reverts) over hand-rolled
+  save/restore blocks; the auto-revert path has no untaken
+  branch for coverage to flag.
+
+See [aio-libs/yarl#1687](https://github.com/aio-libs/yarl/pull/1687)
+for the canonical example: a test added an unreachable `raise`
+inside a patched `__getstate__` and a conditional restore of the
+original attribute, both of which the codecov report rejected as
+uncovered. The same pattern recurs in aiohttp test PRs and the
+same review feedback applies.
+
 ## Cython and generated files
 
 `aiohttp/_http_parser.pyx`, `aiohttp/_http_writer.pyx`, and
@@ -443,6 +510,10 @@ spell-check leg that CI also runs.
 - Do not invent a `## What / ## Why / ## How / ## Testing` PR
   body; use the shipped template at
   `.github/PULL_REQUEST_TEMPLATE.md`.
+- Do not push without running `make doc-spelling` first if you
+  edited any `.rst` file (including a `CHANGES/` fragment). The
+  docs build fails on unknown words and burns a CI run; see
+  _Run the docs spell check before pushing_ above.
 - Do not skip the `CHANGES/` fragment "because the change is
   small". Even a one-line bugfix needs one.
 - Do not add `Co-Authored-By` trailers for LLM tools, in either
@@ -462,6 +533,11 @@ spell-check leg that CI also runs.
   source changes.
 - Do not change one backend without checking the other; see
   "Dual-backend discipline" above.
+- Do not leave unreachable lines in tests (defensive `raise`
+  inside a stub the suite never invokes, cleanup branches that
+  only run for a setup shape the test does not exercise). Tests
+  are part of the coverage report; see _Every line in a test
+  must be covered_ above.
 - Do not open PRs against the release branches (`3.12`, `3.13`,
   etc.); target `master` and let `patchback` handle the
   backport after merge.
